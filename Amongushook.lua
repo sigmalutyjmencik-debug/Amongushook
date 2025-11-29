@@ -1,4 +1,4 @@
--- Amongus.hook | Defuse Division - ULTIMATE FIXED VERSION
+-- Amongus.hook | Defuse Division - WORKING VERSION
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
@@ -33,7 +33,6 @@ local settings = {
 
 local fovCircle
 local aimToggle = false
-local silentAimActive = false
 
 -- Удаляем старый GUI
 if CoreGui:FindFirstChild("AmongusHook") then
@@ -47,7 +46,7 @@ function createFovCircle()
     end
     
     fovCircle = Drawing.new("Circle")
-    fovCircle.Visible = enabled.aim and aimToggle
+    fovCircle.Visible = false
     fovCircle.Thickness = 1
     fovCircle.Color = Color3.fromRGB(255, 50, 50)
     fovCircle.Transparency = 1
@@ -89,15 +88,7 @@ function updateInvisible()
 end
 
 -- ESP
-local espConnections = {}
-
 function updateESP()
-    -- Очистка старых подключений
-    for _, connection in pairs(espConnections) do
-        connection:Disconnect()
-    end
-    espConnections = {}
-    
     for _, targetPlayer in pairs(Players:GetPlayers()) do
         if targetPlayer.Character then
             for _, part in pairs(targetPlayer.Character:GetChildren()) do
@@ -116,53 +107,24 @@ function updateESP()
                 goto continue
             end
             
-            local function setupESP(character)
-                local humanoid = character:FindFirstChildOfClass("Humanoid")
-                if humanoid then
-                    local highlight = Instance.new("Highlight")
-                    highlight.Name = "AMONGUS_ESP"
-                    highlight.Adornee = character
-                    highlight.FillColor = Color3.fromRGB(255, 50, 50)
-                    highlight.FillTransparency = 0.8
-                    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-                    highlight.OutlineTransparency = 0
-                    highlight.Parent = character
-                    
-                    -- Обновление при изменении здоровья
-                    local healthConnection = humanoid.HealthChanged:Connect(function()
-                        if humanoid.Health <= 0 then
-                            highlight:Destroy()
-                        end
-                    end)
-                    
-                    table.insert(espConnections, healthConnection)
-                end
+            local humanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid and humanoid.Health > 0 then
+                local highlight = Instance.new("Highlight")
+                highlight.Name = "AMONGUS_ESP"
+                highlight.Adornee = targetPlayer.Character
+                highlight.FillColor = Color3.fromRGB(255, 50, 50)
+                highlight.FillTransparency = 0.8
+                highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+                highlight.OutlineTransparency = 0
+                highlight.Parent = targetPlayer.Character
             end
-            
-            setupESP(targetPlayer.Character)
-            
-            -- Обработчик появления нового персонажа
-            local charConnection = targetPlayer.CharacterAdded:Connect(function(newChar)
-                wait(1)
-                setupESP(newChar)
-            end)
-            
-            table.insert(espConnections, charConnection)
         end
         ::continue::
     end
 end
 
 -- Хитбоксы
-local hitboxConnections = {}
-
 function updateHitboxes()
-    -- Очистка
-    for _, connection in pairs(hitboxConnections) do
-        connection:Disconnect()
-    end
-    hitboxConnections = {}
-    
     for _, targetPlayer in pairs(Players:GetPlayers()) do
         if targetPlayer.Character then
             for _, part in pairs(targetPlayer.Character:GetChildren()) do
@@ -181,39 +143,19 @@ function updateHitboxes()
                 goto continue
             end
             
-            local function setupHitbox(character)
-                local head = character:FindFirstChild("Head")
-                local humanoid = character:FindFirstChildOfClass("Humanoid")
-                
-                if head and humanoid and humanoid.Health > 0 then
-                    local highlight = Instance.new("Highlight")
-                    highlight.Name = "AMONGUS_HITBOX"
-                    highlight.Adornee = head
-                    highlight.FillColor = Color3.fromRGB(0, 255, 0)
-                    highlight.FillTransparency = 0.3
-                    highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
-                    highlight.OutlineTransparency = 0
-                    highlight.Parent = head
-                    
-                    -- Обновление при смерти
-                    local healthConnection = humanoid.HealthChanged:Connect(function()
-                        if humanoid.Health <= 0 then
-                            highlight:Destroy()
-                        end
-                    end)
-                    
-                    table.insert(hitboxConnections, healthConnection)
-                end
+            local head = targetPlayer.Character:FindFirstChild("Head")
+            local humanoid = targetPlayer.Character:FindFirstChildOfClass("Humanoid")
+            
+            if head and humanoid and humanoid.Health > 0 then
+                local highlight = Instance.new("Highlight")
+                highlight.Name = "AMONGUS_HITBOX"
+                highlight.Adornee = head
+                highlight.FillColor = Color3.fromRGB(0, 255, 0)
+                highlight.FillTransparency = 0.3
+                highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+                highlight.OutlineTransparency = 0
+                highlight.Parent = head
             end
-            
-            setupHitbox(targetPlayer.Character)
-            
-            local charConnection = targetPlayer.CharacterAdded:Connect(function(newChar)
-                wait(1)
-                setupHitbox(newChar)
-            end)
-            
-            table.insert(hitboxConnections, charConnection)
         end
         ::continue::
     end
@@ -320,25 +262,20 @@ function updateAim()
     end
 end
 
--- СИЛЬНЫЙ SILENT AIM (всегда попадает)
-local silentAimHook
+-- РАБОЧИЙ SILENT AIM
+local silentAimConnection
+local silentTarget = nil
 
 function updateSilentAim()
-    if silentAimHook then
-        silentAimHook:Disconnect()
-        silentAimHook = nil
-        if getgenv().silentAimTarget then
-            getgenv().silentAimTarget = nil
-        end
+    if silentAimConnection then
+        silentAimConnection:Disconnect()
+        silentAimConnection = nil
+        silentTarget = nil
     end
     
     if enabled.silent_aim then
-        -- Поиск лучшей цели для Silent Aim
-        local function getSilentAimTarget()
-            if math.random(1, 100) > settings.hit_chance then
-                return nil
-            end
-            
+        silentAimConnection = RunService.Heartbeat:Connect(function()
+            -- Поиск цели
             local closestTarget = nil
             local closestDistance = settings.silent_fov
             local camera = workspace.CurrentCamera
@@ -370,25 +307,10 @@ function updateSilentAim()
                 ::continue::
             end
             
-            return closestTarget
-        end
-        
-        -- Хук для перехвата выстрелов
-        silentAimHook = RunService.Heartbeat:Connect(function()
-            local target = getSilentAimTarget()
-            if not getgenv().silentAimTarget then
-                getgenv().silentAimTarget = target
-            else
-                getgenv().silentAimTarget = target
-            end
+            silentTarget = closestTarget
         end)
-        
-        silentAimActive = true
     else
-        silentAimActive = false
-        if getgenv().silentAimTarget then
-            getgenv().silentAimTarget = nil
-        end
+        silentTarget = nil
     end
 end
 
@@ -409,17 +331,9 @@ function updateSkinChanger()
                     if settings.selected_skin == "Butterfly" then
                         tool.Handle.BrickColor = BrickColor.new("Bright blue")
                         tool.Handle.Material = Enum.Material.Neon
-                        local mesh = tool.Handle:FindFirstChildOfClass("SpecialMesh")
-                        if mesh then
-                            mesh.Scale = Vector3.new(1.5, 1.5, 1.5)
-                        end
                     elseif settings.selected_skin == "Karambit" then
                         tool.Handle.BrickColor = BrickColor.new("Bright red")
                         tool.Handle.Material = Enum.Material.Neon
-                        local mesh = tool.Handle:FindFirstChildOfClass("SpecialMesh")
-                        if mesh then
-                            mesh.Scale = Vector3.new(1.2, 1.2, 1.2)
-                        end
                     end
                 end
             end
@@ -457,7 +371,7 @@ screenGui.Parent = CoreGui
 screenGui.ResetOnSpawn = false
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 400, 0, 550)
+mainFrame.Size = UDim2.new(0, 350, 0, 450)
 mainFrame.Position = UDim2.new(0, 10, 0, 10)
 mainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
 mainFrame.Active = true
@@ -476,7 +390,7 @@ title.Parent = mainFrame
 
 local titleLabel = Instance.new("TextLabel")
 titleLabel.Size = UDim2.new(1, 0, 1, 0)
-titleLabel.Text = "Amongus.hook | SILENT AIM EDITION"
+titleLabel.Text = "Amongus.hook | WORKING"
 titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 titleLabel.BackgroundTransparency = 1
 titleLabel.Font = Enum.Font.GothamBold
@@ -484,8 +398,8 @@ titleLabel.TextSize = 14
 titleLabel.Parent = title
 
 -- Вкладки
-local tabs = {"Main", "Visuals", "Aim", "Others"}
-local currentTab = "Main"
+local tabs = {"Combat", "Visuals", "Movement"}
+local currentTab = "Combat"
 
 local tabContainer = Instance.new("Frame")
 tabContainer.Size = UDim2.new(1, 0, 0, 30)
@@ -515,8 +429,6 @@ for i, tabName in ipairs(tabs) do
     local tabCorner = Instance.new("UICorner")
     tabCorner.CornerRadius = UDim.new(0, 6)
     tabCorner.Parent = tabBtn
-    
-    tabButtons[tabName] = tabBtn
     
     tabBtn.MouseButton1Click:Connect(function()
         currentTab = tabName
@@ -668,65 +580,6 @@ function createInput(parent, text, yPos, currentValue, callback)
     return inputFrame
 end
 
--- Функция создания выбора скина
-function createSkinSelector(parent, yPos)
-    local skinFrame = Instance.new("Frame")
-    skinFrame.Size = UDim2.new(0.9, 0, 0, 80)
-    skinFrame.Position = UDim2.new(0.05, 0, 0, yPos)
-    skinFrame.BackgroundTransparency = 1
-    skinFrame.Parent = parent
-    
-    local skinLabel = Instance.new("TextLabel")
-    skinLabel.Size = UDim2.new(1, 0, 0, 20)
-    skinLabel.Text = "Select Knife Skin:"
-    skinLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-    skinLabel.BackgroundTransparency = 1
-    skinLabel.Font = Enum.Font.Gotham
-    skinLabel.TextSize = 12
-    skinLabel.TextXAlignment = Enum.TextXAlignment.Left
-    skinLabel.Parent = skinFrame
-    
-    local butterflyBtn = Instance.new("TextButton")
-    butterflyBtn.Size = UDim2.new(0.48, 0, 0, 30)
-    butterflyBtn.Position = UDim2.new(0, 0, 0, 25)
-    butterflyBtn.Text = "Butterfly"
-    butterflyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    butterflyBtn.BackgroundColor3 = settings.selected_skin == "Butterfly" and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(50, 50, 65)
-    butterflyBtn.Font = Enum.Font.Gotham
-    butterflyBtn.TextSize = 12
-    butterflyBtn.Parent = skinFrame
-    
-    local karambitBtn = Instance.new("TextButton")
-    karambitBtn.Size = UDim2.new(0.48, 0, 0, 30)
-    karambitBtn.Position = UDim2.new(0.52, 0, 0, 25)
-    karambitBtn.Text = "Karambit"
-    karambitBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    karambitBtn.BackgroundColor3 = settings.selected_skin == "Karambit" and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(50, 50, 65)
-    karambitBtn.Font = Enum.Font.Gotham
-    karambitBtn.TextSize = 12
-    karambitBtn.Parent = skinFrame
-    
-    butterflyBtn.MouseButton1Click:Connect(function()
-        settings.selected_skin = "Butterfly"
-        butterflyBtn.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
-        karambitBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 65)
-        if enabled.skin_changer then
-            updateSkinChanger()
-        end
-    end)
-    
-    karambitBtn.MouseButton1Click:Connect(function()
-        settings.selected_skin = "Karambit"
-        karambitBtn.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
-        butterflyBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 65)
-        if enabled.skin_changer then
-            updateSkinChanger()
-        end
-    end)
-    
-    return skinFrame
-end
-
 -- Обновление GUI
 function updateGUI()
     for _, child in pairs(contentFrame:GetChildren()) do
@@ -735,17 +588,23 @@ function updateGUI()
     
     local yOffset = 10
     
-    if currentTab == "Main" then
+    if currentTab == "Combat" then
         createToggle(contentFrame, "Aimbot [E]", yOffset, "aim")
         yOffset = yOffset + 40
         createToggle(contentFrame, "Silent Aim [X]", yOffset, "silent_aim")
         yOffset = yOffset + 40
         createToggle(contentFrame, "Hitbox Extender", yOffset, "hitbox")
         yOffset = yOffset + 40
-        createToggle(contentFrame, "Bunny Hop", yOffset, "bhop")
-        yOffset = yOffset + 40
         createSetting(contentFrame, "Team Check", yOffset, "team_check")
         yOffset = yOffset + 30
+        createInput(contentFrame, "Aimbot FOV", yOffset, settings.aim_fov, function(value)
+            settings.aim_fov = value
+            if fovCircle then fovCircle.Radius = value end
+        end)
+        yOffset = yOffset + 55
+        createInput(contentFrame, "Silent Aim FOV", yOffset, settings.silent_fov, function(value)
+            settings.silent_fov = value
+        end)
         
     elseif currentTab == "Visuals" then
         createToggle(contentFrame, "ESP", yOffset, "esp")
@@ -756,37 +615,16 @@ function updateGUI()
         yOffset = yOffset + 40
         createToggle(contentFrame, "Invisible", yOffset, "invisible")
         yOffset = yOffset + 40
+        createToggle(contentFrame, "Skin Changer", yOffset, "skin_changer")
+        yOffset = yOffset + 40
         createInput(contentFrame, "Player FOV", yOffset, settings.player_fov, function(value)
             settings.player_fov = value
             if enabled.fov_changer then updateFovChanger() end
         end)
-        yOffset = yOffset + 55
         
-    elseif currentTab == "Aim" then
-        createInput(contentFrame, "Aimbot FOV", yOffset, settings.aim_fov, function(value)
-            settings.aim_fov = value
-            if fovCircle then fovCircle.Radius = value end
-        end)
-        yOffset = yOffset + 55
-        createInput(contentFrame, "Silent Aim FOV", yOffset, settings.silent_fov, function(value)
-            settings.silent_fov = value
-        end)
-        yOffset = yOffset + 55
-        createInput(contentFrame, "Hit Chance %", yOffset, settings.hit_chance, function(value)
-            settings.hit_chance = math.clamp(value, 1, 100)
-        end)
-        yOffset = yOffset + 55
-        createInput(contentFrame, "Hitbox Size", yOffset, settings.hitbox_size, function(value)
-            settings.hitbox_size = value
-            if enabled.hitbox then updateHitboxes() end
-        end)
-        yOffset = yOffset + 55
-        
-    elseif currentTab == "Others" then
-        createToggle(contentFrame, "Skin Changer", yOffset, "skin_changer")
+    elseif currentTab == "Movement" then
+        createToggle(contentFrame, "Bunny Hop", yOffset, "bhop")
         yOffset = yOffset + 40
-        createSkinSelector(contentFrame, yOffset)
-        yOffset = yOffset + 85
         
         local infoLabel = Instance.new("TextLabel")
         infoLabel.Size = UDim2.new(0.9, 0, 0, 100)
@@ -803,45 +641,20 @@ function updateGUI()
 end
 
 -- Инициализация системы
-local function initializeSystem()
-    createFovCircle()
-    
-    -- Автоматическое обновление при изменении камеры
-    workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
-        if fovCircle then
-            fovCircle.Position = Vector2.new(workspace.CurrentCamera.ViewportSize.X / 2, workspace.CurrentCamera.ViewportSize.Y / 2)
-        end
-    end)
-    
-    -- Обработчик появления персонажа
-    player.CharacterAdded:Connect(function(character)
-        wait(1)
-        if enabled.invisible then updateInvisible() end
-        if enabled.skin_changer then updateSkinChanger() end
-    end)
-    
-    -- Обработчик добавления/удаления игроков
-    Players.PlayerAdded:Connect(function()
-        if enabled.esp then updateESP() end
-        if enabled.hitbox then updateHitboxes() end
-    end)
-    
-    Players.PlayerRemoving:Connect(function()
-        if enabled.esp then updateESP() end
-        if enabled.hitbox then updateHitboxes() end
-    end)
-end
-
--- Запуск системы
-initializeSystem()
+createFovCircle()
 updateGUI()
 
 -- Автоматическое обновление
 RunService.Heartbeat:Connect(function()
-    if enabled.esp then updateESP() end
-    if enabled.hitbox then updateHitboxes() end
+    if enabled.esp then 
+        updateESP() 
+    end
+    if enabled.hitbox then 
+        updateHitboxes() 
+    end
 end)
 
 warn("Amongus.hook loaded successfully!")
-warn("Silent Aim: Press X to toggle")
 warn("Aimbot: Press E to toggle")
+warn("Silent Aim: Press X to toggle")
+warn("GUI: Press F4 to hide/show")
